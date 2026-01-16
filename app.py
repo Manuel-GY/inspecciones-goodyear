@@ -17,7 +17,9 @@ equipo = [
     "Claudio Ramirez", 
     "Christian Zuñiga", 
     "Carlos Silva", 
-    "Enzo Muñoz"
+    "Enzo Muñoz",
+    "Luis Mella",
+    "Marco Yañez"
 ]
 
 # Zonas Separadas Individualmente
