@@ -13,7 +13,7 @@ import io
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="KPI Goodyear - Cloud", layout="wide")
 
-# SUSTITUYE ESTO POR EL ID DE TU CARPETA DE GOOGLE DRIVE
+# SUSTITUYE ESTO POR EL ID DE TU CARPETA (Solo el código de letras y números)
 ID_CARPETA_RESPALDOS = "1_maVBnIQIV8hP-5h5WknvQcmx3KDSd8J" 
 
 equipo = ["Carlos Silva", "Marco Yañez", "Luis Mella", "Cristian Curin", 
@@ -24,6 +24,7 @@ meses_orden = ["January", "February", "March", "April", "May", "June",
 
 # --- 2. CONEXIONES ---
 def obtener_creds():
+    # Carga las credenciales desde los Secrets de Streamlit
     creds_dict = json.loads(st.secrets["gcp_service_account"])
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     return ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
@@ -41,7 +42,14 @@ def subir_a_drive(archivo_binario, nombre_archivo):
                               mimetype=archivo_binario.type, 
                               resumable=True)
     
-    archivo_en_drive = drive_service.files().create(body=metadata, media_body=media, fields='id, webViewLink').execute()
+    # supportsAllDrives=True permite usar el espacio de la carpeta compartida
+    archivo_en_drive = drive_service.files().create(
+        body=metadata, 
+        media_body=media, 
+        fields='id, webViewLink',
+        supportsAllDrives=True 
+    ).execute()
+    
     return archivo_en_drive.get('webViewLink')
 
 # --- 3. INTERFAZ ---
@@ -60,7 +68,7 @@ with tab1:
                 ahora = datetime.now(pytz.timezone('America/Santiago'))
                 nombre_final = f"{ins_sel}_{ahora.strftime('%Y%m%d_%H%M')}_{archivo.name}"
                 
-                # 1. Subir archivo físico a Google Drive y obtener LINK
+                # 1. Subir archivo físico a Google Drive
                 link_respaldo = subir_a_drive(archivo, nombre_final)
                 
                 # 2. Guardar registro en Google Sheets
@@ -74,11 +82,11 @@ with tab1:
                     "Planta", 
                     ahora.strftime("%B"), 
                     ahora.year, 
-                    link_respaldo # Aquí guardamos la URL para consultar después
+                    link_respaldo 
                 ]
                 
                 sheet.append_row(nueva_fila)
-                st.success(f"¡Inspección guardada! Archivo disponible en la base de datos.")
+                st.success(f"¡Inspección guardada! Archivo disponible para consulta.")
                 st.balloons()
         except Exception as e:
             st.error(f"Error al procesar: {e}")
@@ -93,30 +101,34 @@ with tab2:
         
         if data:
             df = pd.DataFrame(data)
+            
             # Matriz de colores
-            df_anio = df[df['Año'] == datetime.now().year]
-            pivot = df_anio.groupby(['Inspector', 'Mes']).size().unstack(fill_value=0)
-            pivot = pivot.reindex(index=equipo, columns=meses_orden, fill_value=0)
-            matriz_kpi = (pivot * 25).clip(upper=100)
+            anio_actual = datetime.now().year
+            df_anio = df[df['Año'] == anio_actual]
+            
+            if not df_anio.empty:
+                pivot = df_anio.groupby(['Inspector', 'Mes']).size().unstack(fill_value=0)
+                pivot = pivot.reindex(index=equipo, columns=meses_orden, fill_value=0)
+                matriz_kpi = (pivot * 25).clip(upper=100)
 
-            def color_semaforo(val):
-                if val >= 100: color = '#92d050'
-                elif val >= 50: color = '#ffff00'
-                elif val > 0: color = '#ffc000'
-                else: color = '#ff5050'
-                return f'background-color: {color}; color: black'
+                def color_semaforo(val):
+                    if val >= 100: color = '#92d050'
+                    elif val >= 50: color = '#ffff00'
+                    elif val > 0: color = '#ffc000'
+                    else: color = '#ff5050'
+                    return f'background-color: {color}; color: black'
 
-            st.write("### Cumplimiento Mensual %")
-            st.dataframe(matriz_kpi.style.applymap(color_semaforo).format("{:.0f}%"), use_container_width=True)
+                st.write(f"### Cumplimiento Mensual % - Año {anio_actual}")
+                st.dataframe(matriz_kpi.style.applymap(color_semaforo).format("{:.0f}%"), use_container_width=True)
+            else:
+                st.info(f"No hay registros para el año {anio_actual}")
 
             st.divider()
             
             # --- CONSULTA DE RESPALDOS ---
             st.subheader("🔗 Historial de Respaldos (Consultar)")
-            # Mostramos los últimos registros con el Link clickeable
             df_consulta = df[['Fecha_Hora', 'Inspector', 'Archivo']].tail(15)
             
-            # Configura la columna para que el link sea un botón azul
             st.dataframe(
                 df_consulta, 
                 column_config={"Archivo": st.column_config.LinkColumn("Ver Documento")},
