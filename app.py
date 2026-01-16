@@ -8,9 +8,9 @@ import pytz
 import json
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="KPI Goodyear - Gestión Total", layout="wide")
+st.set_page_config(page_title="KPI Goodyear", layout="wide")
 
-# Equipo Completo
+# Listado de Inspectores
 equipo = [
     "Nelson Ingles", "Sergio Muñoz", "Javier Pincheira", 
     "Angel Arape", "Marcos Uribe", "Jose Saez", "Jaime Plaza",
@@ -19,7 +19,7 @@ equipo = [
     "Luis Mella", "Marco Yañez"
 ]
 
-# Zonas Desglosadas
+# Listado de Máquinas / Zonas
 zonas_reales = [
     "Crane 1", "Crane 2", "Crane 3", "Crane 4", "Crane 5", "Crane 6",
     "Crane 7", "Crane 8", "Crane 9", "Crane 10", "Crane 11",
@@ -47,33 +47,39 @@ def conectar_google():
     return client.open("Base Datos Inspecciones Goodyear").sheet1
 
 # --- 3. INTERFAZ ---
-st.title("🛡️ Sistema de Gestión y KPI Goodyear")
+st.title("🛡️ Sistema de Gestión Goodyear")
 tab1, tab2, tab3 = st.tabs(["📥 Registro", "🚜 Estado Máquinas", "👤 KPI Personal"])
 
 with tab1:
-    st.header("Cargar Nueva Revisión")
+    st.header("Cargar Inspección")
     with st.container(border=True):
         col1, col2 = st.columns(2)
         with col1:
             zona_sel = st.selectbox("Máquina/Zona:", zonas_reales)
         with col2:
             ins_sel = st.selectbox("Inspector:", equipo)
-        archivo = st.file_uploader("Evidencia:", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
+        archivo = st.file_uploader("Evidencia (opcional):", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
     
     if st.button("🚀 Confirmar Registro"):
         try:
-            with st.spinner("Guardando..."):
+            with st.spinner("Registrando..."):
                 ahora = datetime.now(pytz.timezone('America/Santiago'))
                 mes_es = meses_traduccion.get(ahora.strftime("%B"))
-                nueva_fila = [ahora.strftime("%Y-%m-%d %H:%M"), ins_sel, zona_sel, mes_es, ahora.year, archivo.name if archivo else "Sin archivo"]
+                nueva_fila = [
+                    ahora.strftime("%Y-%m-%d %H:%M"), 
+                    ins_sel, 
+                    zona_sel, 
+                    mes_es, 
+                    ahora.year, 
+                    archivo.name if archivo else "Sin archivo"
+                ]
                 sheet = conectar_google()
                 sheet.append_row(nueva_fila)
-                st.success(f"✅ ¡Registrado! {zona_sel} lista.")
-                st.balloons()
+                st.success(f"OK: {zona_sel} registrada por {ins_sel}.")
         except Exception as e:
             st.error(f"Error: {e}")
 
-# Obtener datos para Tab 2 y 3
+# Obtención de datos
 try:
     sheet = conectar_google()
     df = pd.DataFrame(sheet.get_all_records())
@@ -84,25 +90,25 @@ except:
     df_anio = pd.DataFrame()
 
 with tab2:
-    st.header("🚜 Cobertura de Equipos")
+    st.header("🚜 Estado de Máquinas")
     if not df_anio.empty:
-        # Matriz Binaria de Máquinas
         pivot_m = df_anio.groupby(['Zona', 'Mes']).size().unstack(fill_value=0)
         pivot_m = pivot_m.reindex(index=zonas_reales, columns=meses_orden, fill_value=0)
         matriz_m = pivot_m.applymap(lambda x: "OK" if x > 0 else "PENDIENTE")
 
         def color_m(val):
-            bg = '#92d050' if val == "OK" else '#ff5050'
-            return f'background-color: {bg}; color: black; font-weight: bold'
+            bg = '#c6efce' if val == "OK" else '#ffc7ce' # Colores pastel tipo Excel
+            color = '#006100' if val == "OK" else '#9c0006'
+            return f'background-color: {bg}; color: {color}; font-weight: bold; border: 1px solid white'
 
-        st.dataframe(matriz_m.style.applymap(color_m), use_container_width=True, height=500)
+        st.dataframe(matriz_m.style.applymap(color_m), use_container_width=True, height=650)
     else:
-        st.info("Sin datos de máquinas.")
+        st.info("Sin registros.")
 
 with tab3:
-    st.header("👤 Desempeño por Inspector")
+    st.header("👤 KPI por Persona")
     if not df_anio.empty:
-        # Cada registro vale 25%
+        # Cada registro = 25% de meta individual
         pivot_p = df_anio.groupby(['Inspector', 'Mes']).size().unstack(fill_value=0)
         pivot_p = pivot_p.reindex(index=equipo, columns=meses_orden, fill_value=0)
         matriz_p = (pivot_p * 25).clip(upper=100)
@@ -114,16 +120,17 @@ with tab3:
             else: color = '#ff5050'
             return f'background-color: {color}; color: black'
 
-        st.write("### Avance Individual % (Meta: 4 máquinas/mes)")
+        st.write("### Cumplimiento Individual %")
         st.dataframe(matriz_p.style.applymap(color_p).format("{:.0f}%"), use_container_width=True)
-
-        # Gráfico comparativo del mes
+        
+        # Resumen gráfico
         st.divider()
-        st.subheader(f"Ranking de Cumplimiento: {mes_actual}")
         df_mes = matriz_p[mes_actual].reset_index()
         df_mes.columns = ['Inspector', 'Porcentaje']
         fig = px.bar(df_mes, x='Porcentaje', y='Inspector', orientation='h', 
-                     range_x=[0, 100], color='Porcentaje', color_continuous_scale='RdYlGn', text_auto=True)
+                     range_x=[0, 100], color='Porcentaje', 
+                     color_continuous_scale='RdYlGn', text_auto=True,
+                     title=f"Avance del Mes: {mes_actual}")
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Sin datos de inspectores.")
