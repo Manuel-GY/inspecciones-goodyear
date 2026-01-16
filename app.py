@@ -8,21 +8,31 @@ import pytz
 import json
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="KPI Goodyear - Control por Zonas", layout="wide")
+st.set_page_config(page_title="KPI Goodyear - Control Zonas", layout="wide")
 
+# Equipo Actualizado (8 integrantes)
 equipo = [
     "Cristian Curin", "Manuel Rivera", "Claudio Ramirez", 
-    "Christian Zuñiga", "Carlos Silva", "Enzo Muñoz"
+    "Christian Zuñiga", "Carlos Silva", "Enzo Muñoz",
+    "Luis Mella", "Marco Yañez"
 ]
 
+# Zonas del sistema
 zonas_reales = [
     "Crane 1-6", "Crane 7-11", "LR 1-2", "UR 1-2", 
     "Z12", "Z13", "CC01", "CC02", "CC03", 
     "Press Delivery", "Plummers"
 ]
 
-meses_orden = ["January", "February", "March", "April", "May", "June", 
-               "July", "August", "September", "October", "November", "December"]
+# Diccionario de traducción para meses
+meses_traduccion = {
+    "January": "Enero", "February": "Febrero", "March": "Marzo", "April": "Abril",
+    "May": "Mayo", "June": "Junio", "July": "Julio", "August": "Agosto",
+    "September": "Septiembre", "October": "Octubre", "November": "Noviembre", "December": "Diciembre"
+}
+
+meses_orden = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+               "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 # --- 2. CONEXIÓN ---
 def conectar_google():
@@ -51,17 +61,24 @@ with tab1:
         try:
             with st.spinner("Guardando..."):
                 ahora = datetime.now(pytz.timezone('America/Santiago'))
+                # Obtenemos mes en inglés para guardar y lo traducimos
+                mes_ingles = ahora.strftime("%B")
+                mes_espanol = meses_traduccion.get(mes_ingles, mes_ingles)
+                
                 nombre_archivo = archivo.name if archivo else "Sin archivo"
                 
                 nueva_fila = [
                     ahora.strftime("%Y-%m-%d %H:%M"), 
-                    ins_sel, zona_sel, ahora.strftime("%B"), 
-                    ahora.year, nombre_archivo
+                    ins_sel, 
+                    zona_sel, 
+                    mes_espanol, 
+                    ahora.year, 
+                    nombre_archivo
                 ]
                 
                 sheet = conectar_google()
                 sheet.append_row(nueva_fila)
-                st.success(f"✅ Zona {zona_sel} registrada exitosamente.")
+                st.success(f"✅ Inspección en {zona_sel} registrada por {ins_sel}.")
                 st.balloons()
         except Exception as e:
             st.error(f"Error: {e}")
@@ -74,13 +91,15 @@ with tab2:
         
         if data:
             df = pd.DataFrame(data)
-            mes_actual = datetime.now(pytz.timezone('America/Santiago')).strftime("%B")
-            df_mes = df[(df['Mes'] == mes_actual) & (df['Año'] == datetime.now().year)]
+            ahora = datetime.now(pytz.timezone('America/Santiago'))
+            mes_actual_ingles = ahora.strftime("%B")
+            mes_actual = meses_traduccion.get(mes_actual_ingles, mes_actual_ingles)
             
-            # 1. Gráfico por Zona (Frecuencia de inspección)
-            st.subheader(f"¿Cuántas veces se ha revisado cada zona en {mes_actual}?")
+            df_mes = df[(df['Mes'] == mes_actual) & (df['Año'] == ahora.year)]
             
-            # Contamos cuántas veces aparece cada zona en los registros
+            # 1. Gráfico por Zona
+            st.subheader(f"Zonas Revisadas en {mes_actual}")
+            
             conteo_zonas = df_mes['Zona'].value_counts().reindex(zonas_reales, fill_value=0).reset_index()
             conteo_zonas.columns = ['Zona', 'Cantidad']
             
@@ -95,11 +114,11 @@ with tab2:
             )
             st.plotly_chart(fig_zonas, use_container_width=True)
 
-            # 2. Matriz de Cumplimiento de Inspectores
+            # 2. Matriz de Cumplimiento
             st.divider()
             st.subheader("Cumplimiento de Metas por Inspector")
             
-            df_anio = df[df['Año'] == datetime.now().year]
+            df_anio = df[df['Año'] == ahora.year]
             pivot = df_anio.groupby(['Inspector', 'Mes']).size().unstack(fill_value=0)
             pivot = pivot.reindex(index=equipo, columns=meses_orden, fill_value=0)
             matriz_kpi = (pivot * 25).clip(upper=100)
@@ -116,4 +135,4 @@ with tab2:
         else:
             st.info("No hay datos para mostrar gráficos aún.")
     except Exception as e:
-        st.warning("Cargando matriz...")
+        st.warning(f"Error al cargar matriz: {e}")
