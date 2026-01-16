@@ -14,7 +14,7 @@ import io
 st.set_page_config(page_title="KPI Goodyear - Cloud", layout="wide")
 
 # SUSTITUYE ESTO POR EL ID DE TU CARPETA DE GOOGLE DRIVE
-ID_CARPETA_RESPALDOS = "TU_ID_AQUÍ" 
+ID_CARPETA_RESPALDOS = "https://drive.google.com/drive/folders/1_maVBnIQIV8hP-5h5WknvQcmx3KDSd8J?usp=drive_link" 
 
 equipo = ["Carlos Silva", "Marco Yañez", "Luis Mella", "Cristian Curin", 
           "Enzo Muñoz", "Manuel Rivera", "Claudio Ramirez", "Christian Zuñiga"]
