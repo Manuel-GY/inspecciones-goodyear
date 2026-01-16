@@ -29,6 +29,7 @@ def obtener_creds():
 
 def subir_a_drive(archivo_binario, nombre_archivo):
     creds = obtener_creds()
+    # Usamos la versión 3 de la API de Drive
     drive_service = build('drive', 'v3', credentials=creds)
     
     file_metadata = {
@@ -40,25 +41,15 @@ def subir_a_drive(archivo_binario, nombre_archivo):
                               mimetype=archivo_binario.type, 
                               resumable=True)
     
-    # 1. Creamos el archivo
-    archivo_en_drive = drive_service.files().create(
+    # IMPORTANTE: supportsAllDrives=True y usar campos específicos
+    file = drive_service.files().create(
         body=file_metadata, 
         media_body=media, 
         fields='id, webViewLink',
         supportsAllDrives=True
     ).execute()
     
-    file_id = archivo_en_drive.get('id')
-    
-    # 2. TRUCO PARA LA CUOTA: Hacer que el archivo sea público para quien tenga el link 
-    # o simplemente asegurar que herede los permisos de la carpeta.
-    permission = {
-        'type': 'anyone',
-        'role': 'reader',
-    }
-    drive_service.permissions().create(fileId=file_id, body=permission).execute()
-    
-    return archivo_en_drive.get('webViewLink')
+    return file.get('webViewLink')
 
 # --- 3. INTERFAZ ---
 st.title("🛡️ Sistema de Gestión Goodyear")
@@ -72,14 +63,14 @@ with tab1:
     
     if archivo and st.button("🚀 Registrar y Subir"):
         try:
-            with st.spinner("Subiendo respaldo..."):
+            with st.spinner("Procesando subida..."):
                 ahora = datetime.now(pytz.timezone('America/Santiago'))
                 nombre_final = f"{ins_sel}_{ahora.strftime('%Y%m%d_%H%M')}_{archivo.name}"
                 
-                # Subir
+                # Intentar subir el archivo
                 link_respaldo = subir_a_drive(archivo, nombre_final)
                 
-                # Guardar en Google Sheets
+                # Si llegamos aquí, la subida fue exitosa. Ahora guardamos en Sheets.
                 creds = obtener_creds()
                 client = gspread.authorize(creds)
                 sheet = client.open("Base Datos Inspecciones Goodyear").sheet1
@@ -87,13 +78,13 @@ with tab1:
                 nueva_row = [ahora.strftime("%Y-%m-%d %H:%M"), ins_sel, "Planta", ahora.strftime("%B"), ahora.year, link_respaldo]
                 sheet.append_row(nueva_row)
                 
-                st.success("¡Guardado correctamente! El archivo ya está en tu Drive.")
+                st.success("✅ ¡Inspección registrada con éxito!")
                 st.balloons()
         except Exception as e:
             if "storageQuotaExceeded" in str(e):
-                st.error("Error de Espacio: Google no permite que el bot use su propio espacio. Por favor, asegúrate de que la carpeta de Drive esté compartida con el bot como EDITOR.")
+                st.error("⚠️ Error de Cuota de Google: El bot no tiene permiso para usar espacio. Por favor, ve a tu carpeta de Drive y asegúrate de que el bot sea EDITOR y que la carpeta NO sea una unidad compartida restringida.")
             else:
-                st.error(f"Error al procesar: {e}")
+                st.error(f"❌ Error inesperado: {e}")
 
 with tab2:
     st.header("📅 Seguimiento Anual")
