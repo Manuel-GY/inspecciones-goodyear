@@ -1,19 +1,14 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 from datetime import datetime
 import pytz
 import json
-import io
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="KPI Goodyear - Cloud", layout="wide")
-
-# TU ID DE CARPETA (Asegúrate que sea solo el código)
-ID_CARPETA_RESPALDOS = "1_maVBnIQIV8hP-5h5WknvQcmx3KDSd8J" 
+st.set_page_config(page_title="KPI Goodyear", layout="wide")
 
 equipo = ["Carlos Silva", "Marco Yañez", "Luis Mella", "Cristian Curin", 
           "Enzo Muñoz", "Manuel Rivera", "Claudio Ramirez", "Christian Zuñiga"]
@@ -21,77 +16,51 @@ equipo = ["Carlos Silva", "Marco Yañez", "Luis Mella", "Cristian Curin",
 meses_orden = ["January", "February", "March", "April", "May", "June", 
                "July", "August", "September", "October", "November", "December"]
 
-# --- 2. CONEXIONES ---
-def obtener_creds():
+# --- 2. CONEXIÓN ---
+def conectar_google():
     creds_dict = json.loads(st.secrets["gcp_service_account"])
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    return ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-
-def subir_a_drive(archivo_binario, nombre_archivo):
-    creds = obtener_creds()
-    # Usamos la versión 3 de la API de Drive
-    drive_service = build('drive', 'v3', credentials=creds)
-    
-    file_metadata = {
-        'name': nombre_archivo,
-        'parents': [ID_CARPETA_RESPALDOS]
-    }
-    
-    media = MediaIoBaseUpload(io.BytesIO(archivo_binario.getvalue()), 
-                              mimetype=archivo_binario.type, 
-                              resumable=True)
-    
-    # IMPORTANTE: supportsAllDrives=True y usar campos específicos
-    file = drive_service.files().create(
-        body=file_metadata, 
-        media_body=media, 
-        fields='id, webViewLink',
-        supportsAllDrives=True
-    ).execute()
-    
-    return file.get('webViewLink')
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    return client.open("Base Datos Inspecciones Goodyear").sheet1
 
 # --- 3. INTERFAZ ---
-st.title("🛡️ Sistema de Gestión Goodyear")
-tab1, tab2 = st.tabs(["📥 Carga de Inspección", "📊 Matriz de Cumplimiento"])
+st.title("🛡️ Panel de Cumplimiento Goodyear")
+tab1, tab2 = st.tabs(["📥 Registro de Inspección", "📊 Matriz de Desempeño"])
 
 with tab1:
-    st.header("Nueva Inspección")
+    st.header("Nueva Carga")
     with st.container(border=True):
-        ins_sel = st.selectbox("Inspector:", equipo)
-        archivo = st.file_uploader("Subir respaldo:", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
+        ins_sel = st.selectbox("Seleccione Inspector:", equipo)
+        archivo = st.file_uploader("Subir respaldo (solo para registro):", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
     
-    if archivo and st.button("🚀 Registrar y Subir"):
+    if archivo and st.button("🚀 Confirmar Registro (+25%)"):
         try:
-            with st.spinner("Procesando subida..."):
+            with st.spinner("Registrando en la base de datos..."):
                 ahora = datetime.now(pytz.timezone('America/Santiago'))
-                nombre_final = f"{ins_sel}_{ahora.strftime('%Y%m%d_%H%M')}_{archivo.name}"
                 
-                # Intentar subir el archivo
-                link_respaldo = subir_a_drive(archivo, nombre_final)
+                # Preparamos los datos (Guardamos solo el nombre del archivo como texto)
+                nueva_fila = [
+                    ahora.strftime("%Y-%m-%d %H:%M"), 
+                    ins_sel, 
+                    "Planta", 
+                    ahora.strftime("%B"), 
+                    ahora.year, 
+                    archivo.name # Solo guardamos el nombre del archivo
+                ]
                 
-                # Si llegamos aquí, la subida fue exitosa. Ahora guardamos en Sheets.
-                creds = obtener_creds()
-                client = gspread.authorize(creds)
-                sheet = client.open("Base Datos Inspecciones Goodyear").sheet1
+                sheet = conectar_google()
+                sheet.append_row(nueva_fila)
                 
-                nueva_row = [ahora.strftime("%Y-%m-%d %H:%M"), ins_sel, "Planta", ahora.strftime("%B"), ahora.year, link_respaldo]
-                sheet.append_row(nueva_row)
-                
-                st.success("✅ ¡Inspección registrada con éxito!")
+                st.success(f"¡Registro exitoso! {ins_sel} ha sumado 25% a su meta mensual.")
                 st.balloons()
         except Exception as e:
-            if "storageQuotaExceeded" in str(e):
-                st.error("⚠️ Error de Cuota de Google: El bot no tiene permiso para usar espacio. Por favor, ve a tu carpeta de Drive y asegúrate de que el bot sea EDITOR y que la carpeta NO sea una unidad compartida restringida.")
-            else:
-                st.error(f"❌ Error inesperado: {e}")
+            st.error(f"Error al conectar con la base de datos: {e}")
 
 with tab2:
-    st.header("📅 Seguimiento Anual")
+    st.header("📅 Matriz de Cumplimiento Anual")
     try:
-        creds = obtener_creds()
-        client = gspread.authorize(creds)
-        sheet = client.open("Base Datos Inspecciones Goodyear").sheet1
+        sheet = conectar_google()
         data = sheet.get_all_records()
         
         if data:
@@ -100,24 +69,41 @@ with tab2:
             df_anio = df[df['Año'] == anio_act]
             
             if not df_anio.empty:
+                # Crear Matriz (Pivote)
                 pivot = df_anio.groupby(['Inspector', 'Mes']).size().unstack(fill_value=0)
                 pivot = pivot.reindex(index=equipo, columns=meses_orden, fill_value=0)
-                matriz = (pivot * 25).clip(upper=100)
+                
+                # Calcular % (Meta 4 = 100%)
+                matriz_kpi = (pivot * 25).clip(upper=100)
 
+                # Estilo de Colores (Semáforo)
                 def color_semaforo(val):
-                    if val >= 100: color = '#92d050'
-                    elif val >= 50: color = '#ffff00'
-                    elif val > 0: color = '#ffc000'
-                    else: color = '#ff5050'
+                    if val >= 100: color = '#92d050' # Verde
+                    elif val >= 50: color = '#ffff00' # Amarillo
+                    elif val > 0: color = '#ffc000'   # Naranja
+                    else: color = '#ff5050'           # Rojo
                     return f'background-color: {color}; color: black'
 
-                st.dataframe(matriz.style.applymap(color_semaforo).format("{:.0f}%"), use_container_width=True)
+                st.write(f"### Reporte de Avance % - {anio_act}")
+                st.dataframe(matriz_kpi.style.applymap(color_semaforo).format("{:.0f}%"), use_container_width=True)
+                
+                st.divider()
+                
+                # Gráfico de barras del mes actual
+                mes_actual = datetime.now(pytz.timezone('America/Santiago')).strftime("%B")
+                st.subheader(f"Progreso Detallado: {mes_actual}")
+                
+                df_mes_actual = matriz_kpi[mes_actual].reset_index()
+                df_mes_actual.columns = ['Inspector', 'Cumplimiento']
+                
+                fig = px.bar(df_mes_actual, x='Cumplimiento', y='Inspector', orientation='h',
+                             range_x=[0, 100], text_auto=True, color='Cumplimiento',
+                             color_continuous_scale='RdYlGn')
+                st.plotly_chart(fig, use_container_width=True)
             
-            st.divider()
-            st.subheader("🔗 Links de Respaldos")
-            df_links = df[['Fecha_Hora', 'Inspector', 'Archivo']].tail(10)
-            st.dataframe(df_links, column_config={"Archivo": st.column_config.LinkColumn("Ver Documento")}, use_container_width=True)
+            with st.expander("Ver historial de registros (Bitácora)"):
+                st.dataframe(df.tail(20), use_container_width=True)
         else:
-            st.info("No hay datos registrados.")
+            st.info("Aún no hay datos registrados.")
     except Exception as e:
-        st.error(f"Error al cargar: {e}")
+        st.warning("Cargando datos...")
