@@ -109,7 +109,7 @@ with tab3:
     st.header("👤 KPI por Persona")
     if not df_anio.empty:
         # Cada registro = 25% de meta individual
-        pivot_p = df_anio.groupby(['Inspector', 'Mes']).size().unstack(fill_value=0)
+        pivot_p = df_anio.groupby(['Nombre', 'Mes']).size().unstack(fill_value=0)
         pivot_p = pivot_p.reindex(index=equipo, columns=meses_orden, fill_value=0)
         matriz_p = (pivot_p * 25).clip(upper=100)
 
@@ -126,7 +126,7 @@ with tab3:
         # Resumen gráfico
         st.divider()
         df_mes = matriz_p[mes_actual].reset_index()
-        df_mes.columns = ['Inspector', 'Porcentaje']
+        df_mes.columns = ['Nombre', 'Porcentaje']
         fig = px.bar(df_mes, x='Porcentaje', y='Inspector', orientation='h', 
                      range_x=[0, 100], color='Porcentaje', 
                      color_continuous_scale='RdYlGn', text_auto=True,
@@ -135,3 +135,4 @@ with tab3:
     else:
 
         st.info("Sin datos de inspectores.")
+
