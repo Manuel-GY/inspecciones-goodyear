@@ -57,7 +57,7 @@ with tab1:
         with col1:
             zona_sel = st.selectbox("Máquina/Zona:", zonas_reales)
         with col2:
-            ins_sel = st.selectbox("Inspector:", equipo)
+            ins_sel = st.selectbox("Nombre:", equipo)
         archivo = st.file_uploader("Evidencia (opcional):", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
     
     if st.button("🚀 Confirmar Registro"):
@@ -127,7 +127,7 @@ with tab3:
         st.divider()
         df_mes = matriz_p[mes_actual].reset_index()
         df_mes.columns = ['Nombre', 'Porcentaje']
-        fig = px.bar(df_mes, x='Porcentaje', y='Inspector', orientation='h', 
+        fig = px.bar(df_mes, x='Porcentaje', y='Nombre', orientation='h', 
                      range_x=[0, 100], color='Porcentaje', 
                      color_continuous_scale='RdYlGn', text_auto=True,
                      title=f"Avance del Mes: {mes_actual}")
@@ -135,4 +135,5 @@ with tab3:
     else:
 
         st.info("Sin datos de inspectores.")
+
 
