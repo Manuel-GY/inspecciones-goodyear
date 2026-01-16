@@ -3,12 +3,18 @@ import pandas as pd
 import plotly.express as px
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 from datetime import datetime
 import pytz
 import json
+import io
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="KPI Goodyear", layout="wide")
+st.set_page_config(page_title="KPI Goodyear - Cloud", layout="wide")
+
+# SUSTITUYE ESTO POR EL ID DE TU CARPETA DE GOOGLE DRIVE
+ID_CARPETA_RESPALDOS = "TU_ID_AQUÍ" 
 
 equipo = ["Carlos Silva", "Marco Yañez", "Luis Mella", "Cristian Curin", 
           "Enzo Muñoz", "Manuel Rivera", "Claudio Ramirez", "Christian Zuñiga"]
@@ -16,85 +22,109 @@ equipo = ["Carlos Silva", "Marco Yañez", "Luis Mella", "Cristian Curin",
 meses_orden = ["January", "February", "March", "April", "May", "June", 
                "July", "August", "September", "October", "November", "December"]
 
-def conectar_google():
+# --- 2. CONEXIONES ---
+def obtener_creds():
     creds_dict = json.loads(st.secrets["gcp_service_account"])
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-    return client.open("Base Datos Inspecciones Goodyear").sheet1
+    return ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 
-# --- 2. INTERFAZ ---
-st.title("🛡️ Panel de Cumplimiento Goodyear")
-tab1, tab2 = st.tabs(["📥 Subir Inspección", "📊 Matriz de Cumplimiento Anual"])
+def subir_a_drive(archivo_binario, nombre_archivo):
+    creds = obtener_creds()
+    drive_service = build('drive', 'v3', credentials=creds)
+    
+    metadata = {
+        'name': nombre_archivo,
+        'parents': [ID_CARPETA_RESPALDOS]
+    }
+    
+    media = MediaIoBaseUpload(io.BytesIO(archivo_binario.getvalue()), 
+                              mimetype=archivo_binario.type, 
+                              resumable=True)
+    
+    archivo_en_drive = drive_service.files().create(body=metadata, media_body=media, fields='id, webViewLink').execute()
+    return archivo_en_drive.get('webViewLink')
+
+# --- 3. INTERFAZ ---
+st.title("🛡️ Sistema de Gestión Goodyear")
+tab1, tab2 = st.tabs(["📥 Carga de Inspección", "📊 Matriz de Cumplimiento"])
 
 with tab1:
-    st.header("Registro de Actividad")
+    st.header("Nueva Inspección")
     with st.container(border=True):
-        ins_sel = st.selectbox("Seleccione Inspector:", equipo)
-        zona_sel = st.selectbox("Zona:", ["Zona Norte", "Zona Sur", "Planta", "Bodega", "Patio"])
-        archivo = st.file_uploader("Subir respaldo:", type=['xlsx', 'pdf', 'png', 'jpg'])
+        ins_sel = st.selectbox("Inspector:", equipo)
+        archivo = st.file_uploader("Subir respaldo (PDF, Excel, Foto):", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
     
-    if archivo and st.button("🚀 Registrar Inspección (+25%)"):
+    if archivo and st.button("🚀 Registrar y Subir Archivo"):
         try:
-            ahora = datetime.now(pytz.timezone('America/Santiago'))
-            nueva_fila = [ahora.strftime("%Y-%m-%d %H:%M"), ins_sel, zona_sel, ahora.strftime("%B"), ahora.year, archivo.name]
-            sheet = conectar_google()
-            sheet.append_row(nueva_fila)
-            st.success(f"¡Registro exitoso para {ins_sel}!")
-            st.balloons()
+            with st.spinner("Subiendo respaldo a la nube..."):
+                ahora = datetime.now(pytz.timezone('America/Santiago'))
+                nombre_final = f"{ins_sel}_{ahora.strftime('%Y%m%d_%H%M')}_{archivo.name}"
+                
+                # 1. Subir archivo físico a Google Drive y obtener LINK
+                link_respaldo = subir_a_drive(archivo, nombre_final)
+                
+                # 2. Guardar registro en Google Sheets
+                creds = obtener_creds()
+                client = gspread.authorize(creds)
+                sheet = client.open("Base Datos Inspecciones Goodyear").sheet1
+                
+                nueva_fila = [
+                    ahora.strftime("%Y-%m-%d %H:%M"), 
+                    ins_sel, 
+                    "Planta", 
+                    ahora.strftime("%B"), 
+                    ahora.year, 
+                    link_respaldo # Aquí guardamos la URL para consultar después
+                ]
+                
+                sheet.append_row(nueva_fila)
+                st.success(f"¡Inspección guardada! Archivo disponible en la base de datos.")
+                st.balloons()
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error al procesar: {e}")
 
 with tab2:
-    st.header("📅 Matriz de Desempeño Anual")
+    st.header("📅 Seguimiento Anual")
     try:
-        sheet = conectar_google()
+        creds = obtener_creds()
+        client = gspread.authorize(creds)
+        sheet = client.open("Base Datos Inspecciones Goodyear").sheet1
         data = sheet.get_all_records()
+        
         if data:
             df = pd.DataFrame(data)
-            anio_actual = datetime.now().year
-            df_anio = df[df['Año'] == anio_actual]
-
-            # --- CÁLCULO DE LA MATRIZ ---
-            # Agrupamos por Inspector y Mes, contando registros
+            # Matriz de colores
+            df_anio = df[df['Año'] == datetime.now().year]
             pivot = df_anio.groupby(['Inspector', 'Mes']).size().unstack(fill_value=0)
-            
-            # Aseguramos que todos los inspectores y meses existan en la tabla
             pivot = pivot.reindex(index=equipo, columns=meses_orden, fill_value=0)
-            
-            # Convertimos conteo a porcentaje (Cada uno vale 25%, máximo 100%)
             matriz_kpi = (pivot * 25).clip(upper=100)
 
-            # Agregamos columna de Promedio Anual (Total)
-            matriz_kpi['PROMEDIO TOTAL'] = matriz_kpi.mean(axis=1).round(1)
-
-            # --- APLICAR COLORES (ESTILO EXCEL) ---
             def color_semaforo(val):
-                if isinstance(val, str): return ''
-                if val >= 100: color = '#92d050' # Verde
-                elif val >= 50: color = '#ffff00' # Amarillo
-                elif val > 0: color = '#ffc000' # Naranja
-                else: color = '#ff5050' # Rojo
-                return f'background-color: {color}; color: black; border: 1px solid white'
+                if val >= 100: color = '#92d050'
+                elif val >= 50: color = '#ffff00'
+                elif val > 0: color = '#ffc000'
+                else: color = '#ff5050'
+                return f'background-color: {color}; color: black'
 
-            st.write(f"### Cumplimiento % - Año {anio_actual}")
+            st.write("### Cumplimiento Mensual %")
             st.dataframe(matriz_kpi.style.applymap(color_semaforo).format("{:.0f}%"), use_container_width=True)
 
             st.divider()
-
-            # --- GRÁFICO DE PROGRESO DEL MES ACTUAL ---
-            mes_actual = datetime.now(pytz.timezone('America/Santiago')).strftime("%B")
-            st.subheader(f"Detalle de {mes_actual}")
             
-            conteo_mes = matriz_kpi[mes_actual].reset_index()
-            conteo_mes.columns = ['Inspector', 'Porcentaje']
+            # --- CONSULTA DE RESPALDOS ---
+            st.subheader("🔗 Historial de Respaldos (Consultar)")
+            # Mostramos los últimos registros con el Link clickeable
+            df_consulta = df[['Fecha_Hora', 'Inspector', 'Archivo']].tail(15)
             
-            fig = px.bar(conteo_mes, x='Porcentaje', y='Inspector', orientation='h',
-                         title=f"Progreso Mensual %", color='Porcentaje',
-                         range_x=[0, 100], color_continuous_scale='RdYlGn', text_auto=True)
-            st.plotly_chart(fig, use_container_width=True)
+            # Configura la columna para que el link sea un botón azul
+            st.dataframe(
+                df_consulta, 
+                column_config={"Archivo": st.column_config.LinkColumn("Ver Documento")},
+                use_container_width=True,
+                hide_index=True
+            )
             
         else:
-            st.info("No hay datos registrados aún.")
+            st.info("No hay datos en la base de datos.")
     except Exception as e:
-        st.warning("Cargando matriz de datos...")
+        st.error(f"Error al cargar matriz: {e}")
