@@ -54,35 +54,42 @@ with tab2:
             mes_actual = datetime.now(pytz.timezone('America/Santiago')).strftime("%B")
             st.subheader(f"Progreso de {mes_actual}")
 
-            # Cálculo de KPI por persona
+            # Cálculo de datos para el mes
             df_mes = df[df['Mes'] == mes_actual]
             conteo = df_mes['Inspector'].value_counts().reindex(equipo, fill_value=0).reset_index()
             conteo.columns = ['Inspector', 'Cantidad']
-            
-            # Visualización de Barras de Progreso (25% por unidad)
+            conteo['Porcentaje'] = (conteo['Cantidad'] / 4 * 100).clip(upper=100)
+
+            # 1. Gráfico de Barras de Cumplimiento %
+            fig_progreso = px.bar(
+                conteo, 
+                x='Porcentaje', 
+                y='Inspector', 
+                orientation='h',
+                title=f"Cumplimiento Grupal (%) - {mes_actual}",
+                text=[f"{p}%" for p in conteo['Porcentaje']],
+                color='Porcentaje',
+                range_x=[0, 100],
+                color_continuous_scale='RdYlGn' # De Rojo a Verde
+            )
+            st.plotly_chart(fig_progreso, use_container_width=True)
+
+            st.divider()
+
+            # 2. Barras de Progreso Individuales (Visual)
+            st.write("### Detalle Individual")
             for _, row in conteo.iterrows():
-                # Calculamos el porcentaje
-                unidades = row['Cantidad']
-                porcentaje = min(int(unidades / 4 * 100), 100)
-                
+                p = int(row['Porcentaje'])
                 c_nom, c_bar = st.columns([1, 4])
                 c_nom.write(f"**{row['Inspector']}**")
-                
-                # Color dinámico: verde si llegó a la meta
-                color_css = "stProgress > div > div > div > div { background-color: green; }" if porcentaje == 100 else ""
-                st.markdown(f"<style>{color_css}</style>", unsafe_allow_html=True)
-                
-                c_bar.progress(porcentaje / 100)
-                c_bar.caption(f"{unidades} de 4 inspecciones — **{porcentaje}% de cumplimiento**")
+                c_bar.progress(p / 100)
+                c_bar.caption(f"{row['Cantidad']} de 4 inspecciones — **{p}% de cumplimiento**")
             
             st.divider()
             
-            # Gráfico Comparativo Anual
-            st.subheader("Acumulado Anual")
-            fig_anio = px.bar(df['Inspector'].value_counts().reindex(equipo, fill_value=0).reset_index(), 
-                             x='Inspector', y='count', title="Total de Inspecciones en el Año",
-                             color='count', text_auto=True)
-            st.plotly_chart(fig_anio, use_container_width=True)
+            # 3. Acumulado Anual
+            st.subheader("Historial Total")
+            st.dataframe(df, use_container_width=True)
             
         else:
             st.info("No hay datos registrados aún.")
