@@ -13,7 +13,7 @@ st.set_page_config(page_title="KPI Goodyear", layout="wide")
 # Listado de Inspectores
 equipo = [
     "Nelson Ingles", "Sergio Muñoz", "Javier Pincheira", 
-    "Angel Arape", "Marcos Uribe", "Jose Saez", "Jaime Plaza",
+    "Angel Arape", "Marco Uribe", "Jose Saez", "Jaime Plaza",
     "Cristian Curin", "Manuel Rivera", "Claudio Ramirez", 
     "Christian Zuñiga", "Carlos Silva", "Enzo Muñoz",
     "Luis Mella", "Marco Yañez"
@@ -133,4 +133,5 @@ with tab3:
                      title=f"Avance del Mes: {mes_actual}")
         st.plotly_chart(fig, use_container_width=True)
     else:
+
         st.info("Sin datos de inspectores.")
