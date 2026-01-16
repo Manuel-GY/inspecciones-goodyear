@@ -75,7 +75,7 @@ with tab1:
                 ]
                 sheet = conectar_google()
                 sheet.append_row(nueva_fila)
-                st.success(f"OK: {zona_sel} registrada por {ins_sel}.")
+                st.success(f"OK: {zona_sel} registrado por {ins_sel}.")
         except Exception as e:
             st.error(f"Error: {e}")
 
@@ -135,5 +135,6 @@ with tab3:
     else:
 
         st.info("Sin datos de inspectores.")
+
 
 
