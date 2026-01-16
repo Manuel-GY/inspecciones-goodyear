@@ -3,4 +3,5 @@ pandas
 plotly
 openpyxl
 pytz
-st-gsheets-connection
+gspread
+oauth2client
