@@ -13,7 +13,7 @@ import io
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="KPI Goodyear - Cloud", layout="wide")
 
-# SUSTITUYE ESTO POR EL ID DE TU CARPETA (Solo el código de letras y números)
+# SUSTITUYE ESTO POR EL ID DE TU CARPETA
 ID_CARPETA_RESPALDOS = "1_maVBnIQIV8hP-5h5WknvQcmx3KDSd8J" 
 
 equipo = ["Carlos Silva", "Marco Yañez", "Luis Mella", "Cristian Curin", 
@@ -24,7 +24,6 @@ meses_orden = ["January", "February", "March", "April", "May", "June",
 
 # --- 2. CONEXIONES ---
 def obtener_creds():
-    # Carga las credenciales desde los Secrets de Streamlit
     creds_dict = json.loads(st.secrets["gcp_service_account"])
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     return ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
@@ -33,7 +32,8 @@ def subir_a_drive(archivo_binario, nombre_archivo):
     creds = obtener_creds()
     drive_service = build('drive', 'v3', credentials=creds)
     
-    metadata = {
+    # Metadata del archivo
+    file_metadata = {
         'name': nombre_archivo,
         'parents': [ID_CARPETA_RESPALDOS]
     }
@@ -42,12 +42,13 @@ def subir_a_drive(archivo_binario, nombre_archivo):
                               mimetype=archivo_binario.type, 
                               resumable=True)
     
-    # supportsAllDrives=True permite usar el espacio de la carpeta compartida
+    # --- LA CORRECCIÓN CLAVE AQUÍ ---
+    # Usamos supportsAllDrives para que el archivo use la cuota de la carpeta destino
     archivo_en_drive = drive_service.files().create(
-        body=metadata, 
+        body=file_metadata, 
         media_body=media, 
         fields='id, webViewLink',
-        supportsAllDrives=True 
+        supportsAllDrives=True
     ).execute()
     
     return archivo_en_drive.get('webViewLink')
@@ -60,33 +61,26 @@ with tab1:
     st.header("Nueva Inspección")
     with st.container(border=True):
         ins_sel = st.selectbox("Inspector:", equipo)
-        archivo = st.file_uploader("Subir respaldo (PDF, Excel, Foto):", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
+        archivo = st.file_uploader("Subir respaldo:", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
     
-    if archivo and st.button("🚀 Registrar y Subir Archivo"):
+    if archivo and st.button("🚀 Registrar y Subir"):
         try:
-            with st.spinner("Subiendo respaldo a la nube..."):
+            with st.spinner("Subiendo respaldo..."):
                 ahora = datetime.now(pytz.timezone('America/Santiago'))
                 nombre_final = f"{ins_sel}_{ahora.strftime('%Y%m%d_%H%M')}_{archivo.name}"
                 
-                # 1. Subir archivo físico a Google Drive
+                # Subir y obtener link
                 link_respaldo = subir_a_drive(archivo, nombre_final)
                 
-                # 2. Guardar registro en Google Sheets
+                # Guardar en Google Sheets
                 creds = obtener_creds()
                 client = gspread.authorize(creds)
                 sheet = client.open("Base Datos Inspecciones Goodyear").sheet1
                 
-                nueva_fila = [
-                    ahora.strftime("%Y-%m-%d %H:%M"), 
-                    ins_sel, 
-                    "Planta", 
-                    ahora.strftime("%B"), 
-                    ahora.year, 
-                    link_respaldo 
-                ]
+                nueva_row = [ahora.strftime("%Y-%m-%d %H:%M"), ins_sel, "Planta", ahora.strftime("%B"), ahora.year, link_respaldo]
+                sheet.append_row(nueva_row)
                 
-                sheet.append_row(nueva_fila)
-                st.success(f"¡Inspección guardada! Archivo disponible para consulta.")
+                st.success("¡Guardado correctamente en la nube!")
                 st.balloons()
         except Exception as e:
             st.error(f"Error al procesar: {e}")
@@ -101,15 +95,13 @@ with tab2:
         
         if data:
             df = pd.DataFrame(data)
-            
-            # Matriz de colores
-            anio_actual = datetime.now().year
-            df_anio = df[df['Año'] == anio_actual]
+            anio_act = datetime.now().year
+            df_anio = df[df['Año'] == anio_act]
             
             if not df_anio.empty:
                 pivot = df_anio.groupby(['Inspector', 'Mes']).size().unstack(fill_value=0)
                 pivot = pivot.reindex(index=equipo, columns=meses_orden, fill_value=0)
-                matriz_kpi = (pivot * 25).clip(upper=100)
+                matriz = (pivot * 25).clip(upper=100)
 
                 def color_semaforo(val):
                     if val >= 100: color = '#92d050'
@@ -118,25 +110,13 @@ with tab2:
                     else: color = '#ff5050'
                     return f'background-color: {color}; color: black'
 
-                st.write(f"### Cumplimiento Mensual % - Año {anio_actual}")
-                st.dataframe(matriz_kpi.style.applymap(color_semaforo).format("{:.0f}%"), use_container_width=True)
-            else:
-                st.info(f"No hay registros para el año {anio_actual}")
-
+                st.dataframe(matriz.style.applymap(color_semaforo).format("{:.0f}%"), use_container_width=True)
+            
             st.divider()
-            
-            # --- CONSULTA DE RESPALDOS ---
-            st.subheader("🔗 Historial de Respaldos (Consultar)")
-            df_consulta = df[['Fecha_Hora', 'Inspector', 'Archivo']].tail(15)
-            
-            st.dataframe(
-                df_consulta, 
-                column_config={"Archivo": st.column_config.LinkColumn("Ver Documento")},
-                use_container_width=True,
-                hide_index=True
-            )
-            
+            st.subheader("🔗 Links de Respaldos")
+            df_links = df[['Fecha_Hora', 'Inspector', 'Archivo']].tail(10)
+            st.dataframe(df_links, column_config={"Archivo": st.column_config.LinkColumn("Ver Documento")}, use_container_width=True)
         else:
-            st.info("No hay datos en la base de datos.")
+            st.info("No hay datos.")
     except Exception as e:
-        st.error(f"Error al cargar matriz: {e}")
+        st.error(f"Error: {e}")
