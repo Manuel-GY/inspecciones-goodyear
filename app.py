@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from googleapiclient.discovery import build # Añadido para listar archivos
 from datetime import datetime
 import pytz
 import json
@@ -10,7 +11,9 @@ import json
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="KPI Goodyear", layout="wide")
 
-# Listado de Inspectores
+# ID de la carpeta de Google Drive donde están tus archivos Excel/Formatos
+ID_CARPETA_FORMATOS = "1_maVBnIQIV8hP-5h5WknvQcmx3KDSd8J" 
+
 equipo = [
     "Nelson Ingles", "Sergio Muñoz", "Javier Pincheira", 
     "Angel Arape", "Marco Uribe", "Jose Saez", "Jaime Plaza",
@@ -19,7 +22,6 @@ equipo = [
     "Luis Mella", "Marco Yañez"
 ]
 
-# Listado de Máquinas / Zonas
 zonas_reales = [
     "Crane 1", "Crane 2", "Crane 3", "Crane 4", "Crane 5", "Crane 6",
     "Crane 7", "Crane 8", "Crane 9", "Crane 10", "Crane 11",
@@ -38,17 +40,28 @@ meses_traduccion = {
 meses_orden = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
-# --- 2. CONEXIÓN ---
-def conectar_google():
+# --- 2. CONEXIONES ---
+def obtener_creds():
     creds_dict = json.loads(st.secrets["gcp_service_account"])
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    return ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+
+def conectar_google_sheets():
+    creds = obtener_creds()
     client = gspread.authorize(creds)
     return client.open("Base Datos Inspecciones Goodyear").sheet1
 
+def listar_archivos_drive():
+    creds = obtener_creds()
+    service = build('drive', 'v3', credentials=creds)
+    # Buscamos archivos dentro de la carpeta específica
+    query = f"'{ID_CARPETA_FORMATOS}' in parents and trashed = false"
+    results = service.files().list(q=query, fields="files(id, name, webViewLink)").execute()
+    return results.get('files', [])
+
 # --- 3. INTERFAZ ---
 st.title("🛡️ Sistema de Gestión Goodyear")
-tab1, tab2, tab3 = st.tabs(["📥 Registro", "🚜 Estado Máquinas", "👤 KPI Personal"])
+tab1, tab2, tab3, tab4 = st.tabs(["📥 Registro", "🚜 Estado Máquinas", "👤 KPI Personal", "📁 Descarga de Formatos"])
 
 with tab1:
     st.header("Cargar Inspección")
@@ -58,11 +71,9 @@ with tab1:
             zona_sel = st.selectbox("Máquina/Zona:", zonas_reales)
         with col2:
             ins_sel = st.selectbox("Nombre:", equipo)
-        # Cambio de etiqueta a Obligatorio
         archivo = st.file_uploader("Evidencia (Obligatorio):", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
     
     if st.button("🚀 Confirmar Registro"):
-        # VALIDACIÓN: Si no hay archivo, no permite avanzar
         if archivo is None:
             st.warning("⚠️ No se puede registrar: Debe subir un archivo de evidencia para continuar.")
         else:
@@ -70,15 +81,8 @@ with tab1:
                 with st.spinner("Registrando..."):
                     ahora = datetime.now(pytz.timezone('America/Santiago'))
                     mes_es = meses_traduccion.get(ahora.strftime("%B"))
-                    nueva_fila = [
-                        ahora.strftime("%Y-%m-%d %H:%M"), 
-                        ins_sel, 
-                        zona_sel, 
-                        mes_es, 
-                        ahora.year, 
-                        archivo.name # Ya no se requiere el 'if archivo else' porque es obligatorio
-                    ]
-                    sheet = conectar_google()
+                    nueva_fila = [ahora.strftime("%Y-%m-%d %H:%M"), ins_sel, zona_sel, mes_es, ahora.year, archivo.name]
+                    sheet = conectar_google_sheets()
                     sheet.append_row(nueva_fila)
                     st.success(f"OK: {zona_sel} registrado por {ins_sel}.")
             except Exception as e:
@@ -86,7 +90,7 @@ with tab1:
 
 # Obtención de datos
 try:
-    sheet = conectar_google()
+    sheet = conectar_google_sheets()
     df = pd.DataFrame(sheet.get_all_records())
     anio_act = datetime.now(pytz.timezone('America/Santiago')).year
     df_anio = df[df['Año'] == anio_act]
@@ -124,20 +128,34 @@ with tab3:
             else: color = '#ff5050'
             return f'background-color: {color}; color: black'
 
-        st.write("### Cumplimiento Individual %")
         st.dataframe(matriz_p.style.applymap(color_p).format("{:.0f}%"), use_container_width=True)
-        
-        st.divider()
-        df_mes = matriz_p[mes_actual].reset_index()
-        df_mes.columns = ['Nombre', 'Porcentaje']
-        fig = px.bar(df_mes, x='Porcentaje', y='Nombre', orientation='h', 
-                     range_x=[0, 100], color='Porcentaje', 
-                     color_continuous_scale='RdYlGn', text_auto=True,
-                     title=f"Avance del Mes: {mes_actual}")
-        st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Sin datos de inspectores.")
 
+with tab4:
+    st.header("📁 Formatos de Inspección (Excel)")
+    st.write("Selecciona el formato que necesites para descargar:")
+    try:
+        archivos = listar_archivos_drive()
+        if archivos:
+            # Convertimos a DataFrame para mostrarlo bonito
+            df_archivos = pd.DataFrame(archivos)
+            df_archivos.columns = ['ID', 'Nombre del Formato', 'Link de Descarga']
+            
+            # Mostramos la tabla con links clickeables
+            st.dataframe(
+                df_archivos[['Nombre del Formato', 'Link de Descarga']],
+                column_config={
+                    "Link de Descarga": st.column_config.LinkColumn("Descargar / Abrir")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.warning("No se encontraron archivos en la carpeta de Drive.")
+            st.info(f"Asegúrate de subir los Excel a la carpeta con ID: {ID_CARPETA_FORMATOS}")
+    except Exception as e:
+        st.error(f"Error al conectar con Drive: {e}")
 
 
 
