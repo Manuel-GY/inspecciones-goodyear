@@ -58,26 +58,31 @@ with tab1:
             zona_sel = st.selectbox("Máquina/Zona:", zonas_reales)
         with col2:
             ins_sel = st.selectbox("Nombre:", equipo)
-        archivo = st.file_uploader("Evidencia (opcional):", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
+        # Cambio de etiqueta a Obligatorio
+        archivo = st.file_uploader("Evidencia (Obligatorio):", type=['xlsx', 'pdf', 'png', 'jpg', 'csv'])
     
     if st.button("🚀 Confirmar Registro"):
-        try:
-            with st.spinner("Registrando..."):
-                ahora = datetime.now(pytz.timezone('America/Santiago'))
-                mes_es = meses_traduccion.get(ahora.strftime("%B"))
-                nueva_fila = [
-                    ahora.strftime("%Y-%m-%d %H:%M"), 
-                    ins_sel, 
-                    zona_sel, 
-                    mes_es, 
-                    ahora.year, 
-                    archivo.name if archivo else "Sin archivo"
-                ]
-                sheet = conectar_google()
-                sheet.append_row(nueva_fila)
-                st.success(f"OK: {zona_sel} registrado por {ins_sel}.")
-        except Exception as e:
-            st.error(f"Error: {e}")
+        # VALIDACIÓN: Si no hay archivo, no permite avanzar
+        if archivo is None:
+            st.warning("⚠️ No se puede registrar: Debe subir un archivo de evidencia para continuar.")
+        else:
+            try:
+                with st.spinner("Registrando..."):
+                    ahora = datetime.now(pytz.timezone('America/Santiago'))
+                    mes_es = meses_traduccion.get(ahora.strftime("%B"))
+                    nueva_fila = [
+                        ahora.strftime("%Y-%m-%d %H:%M"), 
+                        ins_sel, 
+                        zona_sel, 
+                        mes_es, 
+                        ahora.year, 
+                        archivo.name # Ya no se requiere el 'if archivo else' porque es obligatorio
+                    ]
+                    sheet = conectar_google()
+                    sheet.append_row(nueva_fila)
+                    st.success(f"OK: {zona_sel} registrado por {ins_sel}.")
+            except Exception as e:
+                st.error(f"Error: {e}")
 
 # Obtención de datos
 try:
@@ -97,7 +102,7 @@ with tab2:
         matriz_m = pivot_m.applymap(lambda x: "OK" if x > 0 else "PENDIENTE")
 
         def color_m(val):
-            bg = '#c6efce' if val == "OK" else '#ffc7ce' # Colores pastel tipo Excel
+            bg = '#c6efce' if val == "OK" else '#ffc7ce' 
             color = '#006100' if val == "OK" else '#9c0006'
             return f'background-color: {bg}; color: {color}; font-weight: bold; border: 1px solid white'
 
@@ -108,7 +113,6 @@ with tab2:
 with tab3:
     st.header("👤 KPI por Persona")
     if not df_anio.empty:
-        # Cada registro = 25% de meta individual
         pivot_p = df_anio.groupby(['Nombre', 'Mes']).size().unstack(fill_value=0)
         pivot_p = pivot_p.reindex(index=equipo, columns=meses_orden, fill_value=0)
         matriz_p = (pivot_p * 25).clip(upper=100)
@@ -123,7 +127,6 @@ with tab3:
         st.write("### Cumplimiento Individual %")
         st.dataframe(matriz_p.style.applymap(color_p).format("{:.0f}%"), use_container_width=True)
         
-        # Resumen gráfico
         st.divider()
         df_mes = matriz_p[mes_actual].reset_index()
         df_mes.columns = ['Nombre', 'Porcentaje']
@@ -133,8 +136,8 @@ with tab3:
                      title=f"Avance del Mes: {mes_actual}")
         st.plotly_chart(fig, use_container_width=True)
     else:
-
         st.info("Sin datos de inspectores.")
+
 
 
 
